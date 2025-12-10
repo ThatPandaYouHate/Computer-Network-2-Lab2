@@ -1,0 +1,117 @@
+#+title: XPong --- A Networked Pong Game
+#+subtitle: Computer Networks 2: Lab 2
+#+options: toc:nil
+
+
+You are implementing the networking mechanisms of the Pong game.
+
+* Resources
+- Before you start, read [[https://web.archive.org/web/20190406140818/http://www.gamasutra.com/view/feature/3094/1500_archers_on_a_288_network_.php][this]] paper to have an overview of the
+  Peer-to-Peer (P2P) network model for games.
+- Whenever you are confused, check the libc socket manual using
+  command ~info libc -n socket~.
+- Email [[mailto:xiaoyue.chen@it.uu.se][me]].
+
+* Learning outcome
+- Having practical experience of socket programming using the C
+  programming language on POSIX systems.
+- Being able to implement a custom UDP protocol according to the
+  specifications.
+- Understanding the P2P protocol in the context of video games.
+
+* XPong network protocol
+
+** Overview
+The XPong network protocol is a simple protocol implemented on top of
+the Internet User Datagram protocol (UDP). It allows symmetrical
+communication of two XPong clients. The protocol guarantees that the
+two clients have the same view of each other's input commands every
+epoch.
+
+** Initial connection
+There is no initial connection in this protocol. A client knows the
+address and the port of its peer. It also knows which player it is
+(player 0 or player 1).
+
+** XPong packets
+XPong only has two types of packets:
+| Opcode | Operation            |
+|--------+----------------------|
+|      0 | Command (CMD)        |
+|      1 | Ackowledgement (ACK) |
+
+Both packet types are 4 bytes. They have the following format:
+| 1 byte | 2 bytes      | 1 byte               |
+|--------+--------------+----------------------|
+| Opcode | Epoch number | Input (None/Up/Down) |
+
+The last byte (input) is meaningful only when the opcode is 0 (CMD).
+And the input types are mapped to the following values:
+| Input | Value |
+|-------+-------|
+| None  |     0 |
+| Up    |     1 |
+| Down  |     2 |
+
+** Turn based protocol
+A client starts from epoch 0. Each epoch, it sends CMD packets with
+the epoch number and input value to its peer. The CMD packets of the
+same client /must/ be identical if their epoch numbers are identical.
+
+When the client receives a CMD packet, it replies with an ACK packet.
+The epoch number of the received CMD packet /must/ be identical to
+that of the replying ACK packet.
+
+A client should advance to the next epoch if it has received
+1. A CMD packet for the current epoch from its peer.
+2. An ACK packet for the current epoch from its peer.
+
+Advancing to the next epoch means incrementing the epoch number by 1,
+as well as simulating and rendering.
+
+** Termination
+
+This protocol does not have a termination condition. If the peer
+disconnects, the client stays at the state of the last epoch and
+continue to send and receive packets (though nothing will be
+received).
+
+* Skeleton code
+The skeleton code is hosted on the University GNU/Linux hosts and can
+be found under the ~/it/kurs/datakom2/lab2/xpong~ directory. The
+binary of a reference solution is at
+~/it/kurs/datakom2/lab2/xpong-ref/xpong~. You can use it to test
+against your own client. To use the reference solution, run
+#+begin_src shell
+  xpong 9930 127.0.0.1 9931 0
+#+end_src
+where the first argument (9930) is the port number to listen on. The
+second and the third arguments (127.0.0.1 9931) are the IP address and
+port of the peer. The last argument (0) is the player number --- 0
+or 1.
+
+** Compilation
+The skeleton code compiles on the University GNU/Linux hosts. However,
+you need to use X-forwarding to see the window if you connect to them
+via ssh. X-forwarding introduces significant lag. Therefore, we
+suggest you to compile the code on your own computer if possible.
+
+* Tasks
+
+** Implement all the ~TODOs~ in
+- ~network.h~
+- ~network.c~
+- ~xpong.c~
+
+* Grading
+
+Grading is done during the lab sessions. You also need to submit your
+code /after/ you pass the lab grading session. The submitted code is
+only used for record keeping and plagiarism checking.
+
+To pass this assignment, your implementation must be able to
+
+- Run against another instance of your client.
+- Run against the provided reference client.
+
+And you need to explain your solution to the TA.
