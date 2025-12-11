@@ -140,5 +140,7 @@ int net_poll(net_packet_t *pkt) {
 void net_send(const net_packet_t *pkt) {
   /* TODO: Serialise and send the packet to the other's socket. */
 
-  char buff[4];
+  unsigned char buff[4];
+  serialise(buff, pkt);
+  sendto(sock, buff, sizeof(buff), 0, (struct sockaddr *)&sock_addr_other, sizeof(sock_addr_other));
 }
