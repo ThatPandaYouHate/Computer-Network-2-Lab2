@@ -31,25 +31,8 @@ static struct sockaddr_in sock_addr_other;
 
 void net_init(unsigned short port_self, const char *hostname_other,
               unsigned short port_other) {
-  
-  udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
-  if (udp_sock < 0) {
-    perror("socket");
-    exit(1);
-  }
 
-  
-
-  bind(udp_sock, (struct sockaddr *)&sock_addr_self, sizeof(sock_addr_self));
-  if (bind(udp_sock, (struct sockaddr *)&sock_addr_self, sizeof(sock_addr_self)) < 0) {
-    perror("bind");
-    exit(1);
-  }
-
-
-
-                
-  /*
+   /*
    * TODO:
    *
    * 1. Create a UDP socket.
@@ -60,6 +43,43 @@ void net_init(unsigned short port_self, const char *hostname_other,
    * port_other.
    *
    */
+
+  /* 1. Skapa UDP-socket */
+  sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    const char msg[] = "socket failed\n";
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    _exit(1);
+  }
+
+  /* 2. Binda socketen till port_self på alla interface */
+  struct sockaddr_in sock_addr_self = {0};
+  sock_addr_self.sin_family = AF_INET;
+  sock_addr_self.sin_addr.s_addr = INADDR_ANY;
+  sock_addr_self.sin_port = htons(port_self);
+
+  if (bind(sock, (struct sockaddr *)&sock_addr_self, sizeof(sock_addr_self)) <
+      0) {
+    const char msg[] = "bind failed\n";
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    _exit(1);
+  }
+
+  /* 3. Sätt mottagarens adress (hostname_other, port_other) */
+  sock_addr_other = (struct sockaddr_in){0};
+  sock_addr_other.sin_family = AF_INET;
+  sock_addr_other.sin_port = htons(port_other);
+
+  /* Försök tolka hostname som IP-sträng först, annars via DNS-lookup */
+  if (inet_aton(hostname_other, &sock_addr_other.sin_addr) == 0) {
+    struct hostent *host = gethostbyname(hostname_other);
+    if (host == NULL || host->h_addr_list[0] == NULL) {
+      const char msg[] = "resolve failed\n";
+      write(STDERR_FILENO, msg, sizeof(msg) - 1);
+      _exit(1);
+    }
+    sock_addr_other.sin_addr = *(struct in_addr *)host->h_addr_list[0];
+  }
 }
 
 void net_fini() { close(sock);/* TODO: Shutdown the socket. */ }
@@ -71,10 +91,18 @@ static void serialise(unsigned char *buff, const net_packet_t *pkt) {
    *
    * Note that it must use network endian.
    */
+
+  buff[0] = pkt->opcode;
+  buff[1] = pkt->epoch >> 8;
+  buff[2] = pkt->epoch & 0xFF;
+  buff[3] = pkt->input;
 }
 
 static void deserialise(net_packet_t *pkt, const unsigned char *buff) {
   /* TODO: Deserialise the packet into the net_packet structure. */
+  pkt->opcode = buff[0];
+  pkt->epoch = (buff[1] << 8) | buff[2];
+  pkt->input = buff[3];
 }
 
 int net_poll(net_packet_t *pkt) {
@@ -84,9 +112,33 @@ int net_poll(net_packet_t *pkt) {
    *
    * Returns 1 otherwise.
    */
-  return 0;
+  // Use select to poll for available data, non-blocking.
+  fd_set rfds;
+  struct timeval tv;
+  FD_ZERO(&rfds);
+  FD_SET(sock, &rfds);
+  tv.tv_sec = 0;
+  tv.tv_usec = 0; // Non-blocking
+
+  int retval = select(sock + 1, &rfds, NULL, NULL, &tv);
+  if (retval <= 0) {
+    // Nothing to read or error (treat error as nothing).
+    return 0;
+  }
+
+  // There is data to read; read 4 bytes into buffer.
+  unsigned char buff[4];
+  int bytes_read = read(sock, buff, sizeof(buff));
+  if (bytes_read != 4) {
+    // Not a valid full packet, treat as no packet.
+    return 0;
+  }
+  deserialise(pkt, buff);
+  return 1;
 }
 
 void net_send(const net_packet_t *pkt) {
   /* TODO: Serialise and send the packet to the other's socket. */
+
+  char buff[4];
 }

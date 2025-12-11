@@ -47,7 +47,8 @@ int main(int argc, char *argv[argc + 1]) {
   const char *hostname_other = argv[2];      /* "127.0.0.1" */
   unsigned short port_other = atoi(argv[3]); /* 9931 */
   int player = atol(argv[4]);                /* 0 */
-
+  int other_player = player == 0 ? 1 : 0;
+  
   state_t state = sim_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   win_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   net_init(port_self, hostname_other, port_other);
@@ -73,6 +74,17 @@ int main(int argc, char *argv[argc + 1]) {
        * its flag in epoch_state, and set the command in cmds array. If we
        * receive a acknowledge packet, just mark its flag in epoch_state.
        */
+        
+       net_packet_t pkt;
+       while (net_poll(&pkt)) {
+        if (pkt.opcode == 0) {
+          epoch_state.cmd = true;
+          cmds[other_player] = pkt.input;
+          
+        } else if (pkt.opcode == 1) {
+          epoch_state.ack = true;
+        }
+       }
 
       /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
          is not set */

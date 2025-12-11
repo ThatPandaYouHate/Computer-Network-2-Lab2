@@ -20,6 +20,9 @@
 
 typedef struct net_packet {
   /* TODO: Declare variables according to the protocol. */
+  uint8_t opcode;
+  uint16_t epoch;
+  uint8_t input;
 } net_packet_t;
 
 void net_init(unsigned short port_self, const char *hostname_other,
