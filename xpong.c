@@ -76,11 +76,14 @@ int main(int argc, char *argv[argc + 1]) {
        */
         
        net_packet_t pkt;
-       while (net_poll(&pkt)) {
+       while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
         if (pkt.opcode == 0) {
           epoch_state.cmd = true;
           cmds[other_player] = pkt.input;
-          
+          pkt.opcode = 1;
+          pkt.epoch = epoch;
+          pkt.input = 0;
+          net_send(&pkt);
         } else if (pkt.opcode == 1) {
           epoch_state.ack = true;
         }
@@ -88,19 +91,28 @@ int main(int argc, char *argv[argc + 1]) {
 
       /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
          is not set */
-      cmds[player] = (e.up ^ e.down) * (e.up * CMD_UP + e.down * CMD_DOWN);
+      if (!epoch_state.cmd_self) {
+        cmds[player] = (e.up ^ e.down) * (e.up * CMD_UP + e.down * CMD_DOWN);
+        epoch_state.cmd_self = true;
+      }
 
       /* TODO: Send a command packet. */
-
+      pkt.opcode = 0;
+      pkt.epoch = epoch;
+      pkt.input = cmds[player];
+      net_send(&pkt);
       /* TODO: Add conditions for simulation. To simulate and move onto the next
          epoch, we must have received the command packet and the acknowledge
          packet from the other player. */
 
-      state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
-      ++epoch;
-      epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
+      if (epoch_state.cmd && epoch_state.ack) {
+        state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
+        printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
+        ++epoch;
+        epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
 
-      win_render(&state);
+        win_render(&state);
+      }
     }
   }
 
