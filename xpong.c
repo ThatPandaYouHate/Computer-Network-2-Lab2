@@ -36,6 +36,11 @@ static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
 
+
+#define OPCODE_CMD 0
+#define OPCODE_ACK 1
+#define OPCODE_START 2
+
 typedef struct epoch {
   bool cmd;
   bool ack;
@@ -48,6 +53,7 @@ int main(int argc, char *argv[argc + 1]) {
   unsigned short port_other = atoi(argv[3]); /* 9931 */
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
+  bool game_started = false;
   
   state_t state = sim_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   win_init(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -61,9 +67,24 @@ int main(int argc, char *argv[argc + 1]) {
   uint32_t previous_tick = win_tick();
 
   while (!quit) {
+    net_packet_t pkt;
     win_event_t e = win_poll_event();
     if (e.quit)
       quit = true;
+
+    /* Wait for the other player to start the game */
+    while (!game_started) {
+      pkt.opcode = OPCODE_START;
+      pkt.epoch = epoch;
+      pkt.input = 0;
+      net_send(&pkt);
+      if (net_poll(&pkt)){
+        if (pkt.opcode == OPCODE_START) {
+          game_started = true;
+          printf("game started\n");
+        }
+      }
+    }
 
     for (; win_tick() - previous_tick > SIM_INTERVAL;
          previous_tick += SIM_INTERVAL) {
@@ -74,33 +95,43 @@ int main(int argc, char *argv[argc + 1]) {
        * its flag in epoch_state, and set the command in cmds array. If we
        * receive a acknowledge packet, just mark its flag in epoch_state.
        */
-        
-       net_packet_t pkt;
+      
+       
        while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
-        if (pkt.opcode == 0) {
+        if (pkt.opcode == OPCODE_CMD) {
           epoch_state.cmd = true;
           cmds[other_player] = pkt.input;
-          pkt.opcode = 1;
+          pkt.opcode = OPCODE_ACK;
           pkt.epoch = epoch;
           pkt.input = 0;
           net_send(&pkt);
-        } else if (pkt.opcode == 1) {
+        } else if (pkt.opcode == OPCODE_ACK) {
           epoch_state.ack = true;
         }
-       }
+      }
 
       /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
          is not set */
+      
       if (!epoch_state.cmd_self) {
-        cmds[player] = (e.up ^ e.down) * (e.up * CMD_UP + e.down * CMD_DOWN);
+        if (e.up) {
+          cmds[player] = CMD_UP;
+        } else if (e.down) {
+          cmds[player] = CMD_DOWN;
+        } else {
+          cmds[player] = CMD_NONE;
+        }
+
+        /* TODO: Send a command packet. */
+        net_packet_t pkt;
+        pkt.opcode = OPCODE_CMD;
+        pkt.epoch = epoch;
+        pkt.input = cmds[player];
+        net_send(&pkt);
+
         epoch_state.cmd_self = true;
       }
 
-      /* TODO: Send a command packet. */
-      pkt.opcode = 0;
-      pkt.epoch = epoch;
-      pkt.input = cmds[player];
-      net_send(&pkt);
       /* TODO: Add conditions for simulation. To simulate and move onto the next
          epoch, we must have received the command packet and the acknowledge
          packet from the other player. */
