@@ -88,51 +88,55 @@ int main(int argc, char *argv[argc + 1]) {
       }
     }
 
+    /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
+       is not set */
+    
+    if (!epoch_state.cmd_self) {
+      if (e.up) {
+        cmds[player] = CMD_UP;
+      } else if (e.down) {
+        cmds[player] = CMD_DOWN;
+      } else {
+        cmds[player] = CMD_NONE;
+      }
+
+      epoch_state.cmd_self = true;
+    }
+
+    /*
+     * TODO: Poll and handle each packet until no more packet.
+     *
+     * If we receive a command packet, send an acknowledgement packet, mark
+     * its flag in epoch_state, and set the command in cmds array. If we
+     * receive a acknowledge packet, just mark its flag in epoch_state.
+     */
+    
+     
+    while (net_poll(&pkt)) {
+      if (pkt.opcode == OPCODE_CMD && pkt.epoch == epoch && !epoch_state.cmd) {
+        epoch_state.cmd = true;
+        cmds[other_player] = pkt.input;
+        net_packet_t ack_pkt;
+        ack_pkt.opcode = OPCODE_ACK;
+        ack_pkt.epoch = epoch;
+        ack_pkt.input = 0;
+        net_send(&ack_pkt);
+      } else if (pkt.opcode == OPCODE_ACK && pkt.epoch == epoch) {
+        epoch_state.ack = true;
+      }
+    }
+
+    /* TODO: Send a command packet. */
+    if (epoch_state.cmd_self) {
+      net_packet_t cmd_pkt;
+      cmd_pkt.opcode = OPCODE_CMD;
+      cmd_pkt.epoch = epoch;
+      cmd_pkt.input = cmds[player];
+      net_send(&cmd_pkt);
+    }
+
     for (; win_tick() - previous_tick > SIM_INTERVAL;
         previous_tick += SIM_INTERVAL) {
-      /*
-       * TODO: Poll and handle each packet until no more packet.
-       *
-       * If we receive a command packet, send an acknowledgement packet, mark
-       * its flag in epoch_state, and set the command in cmds array. If we
-       * receive a acknowledge packet, just mark its flag in epoch_state.
-       */
-      
-       
-      while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
-        if (pkt.opcode == OPCODE_CMD && pkt.epoch == epoch && !epoch_state.cmd) {
-          epoch_state.cmd = true;
-          cmds[other_player] = pkt.input;
-          pkt.opcode = OPCODE_ACK;
-          pkt.epoch = epoch;
-          pkt.input = 0;
-          net_send(&pkt);
-        } else if (pkt.opcode == OPCODE_ACK && pkt.epoch == epoch) {
-          epoch_state.ack = true;
-        }
-      }
-
-      /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
-         is not set */
-      
-      if (!epoch_state.cmd_self) {
-        if (e.up) {
-          cmds[player] = CMD_UP;
-        } else if (e.down) {
-          cmds[player] = CMD_DOWN;
-        } else {
-          cmds[player] = CMD_NONE;
-        }
-
-        epoch_state.cmd_self = true;
-      }
-
-      /* TODO: Send a command packet. */
-      net_packet_t pkt;
-      pkt.opcode = OPCODE_CMD;
-      pkt.epoch = epoch;
-      pkt.input = cmds[player];
-      net_send(&pkt);
 
       /* TODO: Add conditions for simulation. To simulate and move onto the next
          epoch, we must have received the command packet and the acknowledge
@@ -157,10 +161,11 @@ int main(int argc, char *argv[argc + 1]) {
         printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
         ++epoch;
         epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
-
-        win_render(&state);
       }
     }
+
+    /* Render every frame, not just when synchronized */
+    win_render(&state);
   }
 
   net_fini();
