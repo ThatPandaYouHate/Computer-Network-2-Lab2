@@ -87,7 +87,7 @@ int main(int argc, char *argv[argc + 1]) {
     }
 
     for (; win_tick() - previous_tick > SIM_INTERVAL;
-         previous_tick += SIM_INTERVAL) {
+        previous_tick += SIM_INTERVAL) {
       /*
        * TODO: Poll and handle each packet until no more packet.
        *
@@ -97,15 +97,15 @@ int main(int argc, char *argv[argc + 1]) {
        */
       
        
-       while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
-        if (pkt.opcode == OPCODE_CMD) {
+      while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
+        if (pkt.opcode == OPCODE_CMD && pkt.epoch == epoch && !epoch_state.cmd) {
           epoch_state.cmd = true;
           cmds[other_player] = pkt.input;
           pkt.opcode = OPCODE_ACK;
           pkt.epoch = epoch;
           pkt.input = 0;
           net_send(&pkt);
-        } else if (pkt.opcode == OPCODE_ACK) {
+        } else if (pkt.opcode == OPCODE_ACK && pkt.epoch == epoch) {
           epoch_state.ack = true;
         }
       }
@@ -122,15 +122,15 @@ int main(int argc, char *argv[argc + 1]) {
           cmds[player] = CMD_NONE;
         }
 
-        /* TODO: Send a command packet. */
-        net_packet_t pkt;
-        pkt.opcode = OPCODE_CMD;
-        pkt.epoch = epoch;
-        pkt.input = cmds[player];
-        net_send(&pkt);
-
         epoch_state.cmd_self = true;
       }
+
+      /* TODO: Send a command packet. */
+      net_packet_t pkt;
+      pkt.opcode = OPCODE_CMD;
+      pkt.epoch = epoch;
+      pkt.input = cmds[player];
+      net_send(&pkt);
 
       /* TODO: Add conditions for simulation. To simulate and move onto the next
          epoch, we must have received the command packet and the acknowledge
