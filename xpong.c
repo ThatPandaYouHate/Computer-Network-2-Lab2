@@ -35,6 +35,7 @@
 static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
+static const int BUFFER_SIZE = 64;  // Add buffer size
 
 
 #define OPCODE_CMD 0
@@ -62,6 +63,7 @@ int main(int argc, char *argv[argc + 1]) {
   uint16_t epoch = 0;
   epoch_t epoch_state = {false, false, false};
   cmd_t cmds[2];
+  cmd_t cmd_buffer[2][BUFFER_SIZE];  // ADD: Command buffer
   bool quit = false;
 
   uint32_t previous_tick = win_tick();
@@ -137,7 +139,21 @@ int main(int argc, char *argv[argc + 1]) {
          packet from the other player. */
 
       if (epoch_state.cmd && epoch_state.ack) {
-        state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
+        cmd_buffer[player][(epoch + 10) % BUFFER_SIZE] = cmds[player];
+        cmd_buffer[other_player][(epoch + 10) % BUFFER_SIZE] = cmds[other_player];
+
+        printf("[RECORD] epoch %d: storing cmds for epoch %d -> player %d: %d, player %d: %d\n",
+               epoch, (epoch + 10) % BUFFER_SIZE, player, cmds[player], other_player, cmds[other_player]);
+
+        if (epoch >= 10) {
+          cmd_t epoch_cmds[2] = {
+            cmd_buffer[0][epoch % BUFFER_SIZE],
+            cmd_buffer[1][epoch % BUFFER_SIZE]
+          };
+          printf("[EXECUTE] epoch %d: executing from buffer slot %d -> player 0: %d, player 1: %d\n",
+                 epoch, epoch % BUFFER_SIZE, epoch_cmds[0], epoch_cmds[1]);
+          state = sim_update(&state, epoch_cmds, SIM_INTERVAL / 1000.f);
+        }
         printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
         ++epoch;
         epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
