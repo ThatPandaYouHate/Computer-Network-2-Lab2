@@ -65,6 +65,7 @@ int main(int argc, char *argv[argc + 1]) {
   bool quit = false;
 
   uint32_t previous_tick = win_tick();
+  uint32_t epoch_start_tick = previous_tick;
 
   while (!quit) {
     net_packet_t pkt;
@@ -82,6 +83,8 @@ int main(int argc, char *argv[argc + 1]) {
         if (pkt.opcode == OPCODE_START) {
           game_started = true;
           printf("game started\n");
+          previous_tick = win_tick();
+          epoch_start_tick = previous_tick;
         }
       }
     }
@@ -126,7 +129,6 @@ int main(int argc, char *argv[argc + 1]) {
       }
 
       /* TODO: Send a command packet. */
-      net_packet_t pkt;
       pkt.opcode = OPCODE_CMD;
       pkt.epoch = epoch;
       pkt.input = cmds[player];
@@ -137,6 +139,11 @@ int main(int argc, char *argv[argc + 1]) {
          packet from the other player. */
 
       if (epoch_state.cmd && epoch_state.ack) {
+        uint32_t epoch_end_tick = win_tick();
+        fprintf(stderr, "epoch %u took %u ms\n", (unsigned)epoch,
+                (unsigned)(epoch_end_tick - epoch_start_tick));
+        epoch_start_tick = epoch_end_tick;
+
         state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
         printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
         ++epoch;
