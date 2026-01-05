@@ -37,7 +37,7 @@ static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
 static const int BUFFER_SIZE = 64;
-static const int CMD_DELAY = 25;
+static const int CMD_DELAY = 10;
 
 
 #define OPCODE_CMD 0
@@ -80,10 +80,10 @@ int main(int argc, char *argv[argc + 1]) {
   
   for (int i = 0; i < CMD_DELAY; i++) {
     cmd_state[player][i].cmd_value = 0;
-    cmd_state[player][i].cmd_ack = true;
+    cmd_state[player][i].cmd_ack = false;
     cmd_state[player][i].epoch = i;
     cmd_state[other_player][i].cmd_value = 0;
-    cmd_state[other_player][i].cmd_ack = true;
+    cmd_state[other_player][i].cmd_ack = false;
     cmd_state[other_player][i].epoch = i;
   }
   printf("cmd_state initialized\n");
@@ -104,6 +104,10 @@ int main(int argc, char *argv[argc + 1]) {
   uint32_t min_epoch_time = UINT32_MAX;
   uint32_t max_epoch_time = 0;
   uint16_t epoch_count = 0;
+  
+  // Array to store last 100 epoch times for averaging
+  uint32_t last_100_epoch_times[100] = {0};
+  uint16_t epoch_time_index = 0;
 
   printf("game started\n");
   printf("waiting for player %d to start the game\n", other_player);
@@ -154,10 +158,11 @@ int main(int argc, char *argv[argc + 1]) {
         cmds[player] = CMD_NONE;
       }
 
-
-      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_value = cmds[player];
-      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_ack = false;
-      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].epoch = epoch + CMD_DELAY;
+      if (cmd_state[player][(epoch+CMD_DELAY) % BUFFER_SIZE].epoch != epoch + CMD_DELAY) {
+        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_value = cmds[player];
+        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_ack = false;
+        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].epoch = epoch + CMD_DELAY;
+      }
 
       for (int i = 0; i < BUFFER_SIZE; i++) {
         if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false) {
@@ -183,9 +188,34 @@ int main(int argc, char *argv[argc + 1]) {
         }
         epoch_count++;
         
-        // Print time for every 100th epoch
-        if (epoch % 100 == 0) {
-          fprintf(stderr, "epoch %u took %u ms\n", (unsigned)epoch, epoch_time);
+        // Store epoch time in circular buffer
+        last_100_epoch_times[epoch_time_index] = epoch_time;
+        epoch_time_index = (epoch_time_index + 1) % 100;
+        
+        // Print average time for every 100th epoch
+        if (epoch > 0 && epoch % 100 == 0) {
+          uint32_t sum = 0;
+          uint16_t count = epoch_count < 100 ? epoch_count : 100;
+          
+          // Calculate average from circular buffer
+          // If we have less than 100 epochs, use all available
+          // Otherwise, use the last 100 (which wraps around)
+          if (epoch_count < 100) {
+            for (uint16_t i = 0; i < count; i++) {
+              sum += last_100_epoch_times[i];
+            }
+          } else {
+            // Circular buffer: values from epoch_time_index to end, then from start to epoch_time_index
+            for (uint16_t i = epoch_time_index; i < 100; i++) {
+              sum += last_100_epoch_times[i];
+            }
+            for (uint16_t i = 0; i < epoch_time_index; i++) {
+              sum += last_100_epoch_times[i];
+            }
+          }
+          uint32_t avg_time = sum / count;
+          fprintf(stderr, "epoch %u: average time over last %u epochs: %u ms\n", 
+                  (unsigned)epoch, count, avg_time);
         }
         
         epoch_start_tick = epoch_end_tick;
