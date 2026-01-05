@@ -22,6 +22,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -95,6 +96,12 @@ int main(int argc, char *argv[argc + 1]) {
 
   uint32_t previous_tick = win_tick();
   uint32_t epoch_start_tick = previous_tick;
+  
+  // Statistics for epoch times
+  uint32_t total_epoch_time = 0;
+  uint32_t min_epoch_time = UINT32_MAX;
+  uint32_t max_epoch_time = 0;
+  uint16_t epoch_count = 0;
 
   printf("game started\n");
   printf("waiting for player %d to start the game\n", other_player);
@@ -117,7 +124,6 @@ int main(int argc, char *argv[argc + 1]) {
       while (net_poll(&pkt)) {
         switch (pkt.opcode) {
           case OPCODE_CMD:
-            printf("received command packet from player %d\n", other_player);
             cmd_state[other_player][pkt.epoch%BUFFER_SIZE].cmd_value = pkt.input;
             cmd_state[other_player][pkt.epoch%BUFFER_SIZE].epoch = pkt.epoch;
             pkt.opcode = OPCODE_ACK;
@@ -125,7 +131,6 @@ int main(int argc, char *argv[argc + 1]) {
             net_send(&pkt);
             break;
           case OPCODE_ACK:
-            printf("received acknowledge packet from player %d\n", other_player);
             cmd_state[player][pkt.epoch%BUFFER_SIZE].cmd_ack = true;
             break;
           default:
@@ -163,8 +168,18 @@ int main(int argc, char *argv[argc + 1]) {
 
       if (cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true) {
         uint32_t epoch_end_tick = win_tick();
-        fprintf(stderr, "epoch %u took %u ms\n", (unsigned)epoch,
-                (unsigned)(epoch_end_tick - epoch_start_tick));
+        uint32_t epoch_time = epoch_end_tick - epoch_start_tick;
+        
+        // Collect statistics
+        total_epoch_time += epoch_time;
+        if (epoch_time < min_epoch_time) {
+          min_epoch_time = epoch_time;
+        }
+        if (epoch_time > max_epoch_time) {
+          max_epoch_time = epoch_time;
+        }
+        epoch_count++;
+        
         epoch_start_tick = epoch_end_tick;
 
         cmds[other_player] = cmd_state[other_player][epoch % BUFFER_SIZE].cmd_value;
@@ -174,12 +189,20 @@ int main(int argc, char *argv[argc + 1]) {
         ++epoch;
 
       }
-      else {
-        printf("epoch %u not ready\n", epoch);
-        printf("other_player epoch: %u\n", cmd_state[other_player][epoch % BUFFER_SIZE].epoch);
-        printf("player ack: %u\n", cmd_state[player][epoch % BUFFER_SIZE].cmd_ack);
-      }
+      
     }
+  }
+
+  // Print summary of epoch times
+  if (epoch_count > 0) {
+    uint32_t avg_epoch_time = total_epoch_time / epoch_count;
+    fprintf(stderr, "\n=== Epoch Time Summary ===\n");
+    fprintf(stderr, "Total epochs: %u\n", epoch_count);
+    fprintf(stderr, "Total time: %u ms\n", total_epoch_time);
+    fprintf(stderr, "Average time per epoch: %u ms\n", avg_epoch_time);
+    fprintf(stderr, "Minimum time: %u ms\n", min_epoch_time);
+    fprintf(stderr, "Maximum time: %u ms\n", max_epoch_time);
+    fprintf(stderr, "========================\n");
   }
 
   net_fini();
