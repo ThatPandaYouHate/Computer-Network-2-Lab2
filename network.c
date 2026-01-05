@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <unistd.h>
 
 static int sock;
@@ -51,6 +52,8 @@ void net_init(unsigned short port_self, const char *hostname_other,
     write(STDERR_FILENO, msg, sizeof(msg) - 1);
     _exit(1);
   }
+  printf("socket created: %d", sock);
+  
 
   /* 2. Binda socketen till port_self på alla interface */
   struct sockaddr_in sock_addr_self = {0};

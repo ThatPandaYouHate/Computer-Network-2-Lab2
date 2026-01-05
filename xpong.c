@@ -39,7 +39,6 @@ static const int SIM_INTERVAL = 10;
 
 #define OPCODE_CMD 0
 #define OPCODE_ACK 1
-#define OPCODE_START 2
 
 typedef struct epoch {
   bool cmd;
@@ -47,13 +46,33 @@ typedef struct epoch {
   bool cmd_self;
 } epoch_t;
 
+static void usage(const char *program_name) {
+  fprintf(stderr, "Usage: %s <self_port> <peer_hostname> <peer_port> <player>\n", program_name);
+  fprintf(stderr, "\n");
+  fprintf(stderr, "Arguments:\n");
+  fprintf(stderr, "  self_port      Port to listen on (e.g. 9930)\n");
+  fprintf(stderr, "  peer_hostname  Peer's hostname or IP address (e.g. 127.0.0.1)\n");
+  fprintf(stderr, "  peer_port      Peer's port (e.g. 9931)\n");
+  fprintf(stderr, "  player         Player number, 0 or 1\n");
+  fprintf(stderr, "\n");
+  fprintf(stderr, "Examples:\n");
+  fprintf(stderr, "  %s 9930 127.0.0.1 9931 0\n", program_name);
+  fprintf(stderr, "  %s 9931 127.0.0.1 9930 1\n", program_name);
+}
+
 int main(int argc, char *argv[argc + 1]) {
+  if (argc != 5) {
+    usage(argv[0]);
+    return 1;
+  }
   unsigned short port_self = atoi(argv[1]);  /* 9930 */
   const char *hostname_other = argv[2];      /* "127.0.0.1" */
   unsigned short port_other = atoi(argv[3]); /* 9931 */
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
   bool game_started = false;
+
+  
   
   state_t state = sim_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   win_init(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -67,27 +86,13 @@ int main(int argc, char *argv[argc + 1]) {
   uint32_t previous_tick = win_tick();
   uint32_t epoch_start_tick = previous_tick;
 
+  printf("game started\n");
+  printf("waiting for player %d to start the game\n", other_player);
   while (!quit) {
     net_packet_t pkt;
     win_event_t e = win_poll_event();
     if (e.quit)
       quit = true;
-
-    /* Wait for the other player to start the game */
-    while (!game_started) {
-      pkt.opcode = OPCODE_START;
-      pkt.epoch = epoch;
-      pkt.input = 0;
-      net_send(&pkt);
-      if (net_poll(&pkt)){
-        if (pkt.opcode == OPCODE_START) {
-          game_started = true;
-          printf("game started\n");
-          previous_tick = win_tick();
-          epoch_start_tick = previous_tick;
-        }
-      }
-    }
 
     for (; win_tick() - previous_tick > SIM_INTERVAL;
         previous_tick += SIM_INTERVAL) {
@@ -99,17 +104,21 @@ int main(int argc, char *argv[argc + 1]) {
        * receive a acknowledge packet, just mark its flag in epoch_state.
        */
       
-       
       while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
-        if (pkt.opcode == OPCODE_CMD && pkt.epoch == epoch && !epoch_state.cmd) {
-          epoch_state.cmd = true;
-          cmds[other_player] = pkt.input;
-          pkt.opcode = OPCODE_ACK;
-          pkt.epoch = epoch;
-          pkt.input = 0;
-          net_send(&pkt);
-        } else if (pkt.opcode == OPCODE_ACK && pkt.epoch == epoch) {
-          epoch_state.ack = true;
+        if (pkt.epoch == epoch) {
+          switch (pkt.opcode) {
+            case OPCODE_CMD:
+              epoch_state.cmd = true;
+              cmds[other_player] = pkt.input;
+              pkt.opcode = OPCODE_ACK;
+              pkt.epoch = epoch;
+              pkt.input = 0;
+              net_send(&pkt);
+              break;
+            case OPCODE_ACK:
+              epoch_state.ack = true;
+              break;
+          }
         }
       }
 
@@ -145,7 +154,7 @@ int main(int argc, char *argv[argc + 1]) {
         epoch_start_tick = epoch_end_tick;
 
         state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
-        printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
+        //printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
         ++epoch;
         epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
 
