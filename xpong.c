@@ -162,9 +162,14 @@ int main(int argc, char *argv[argc + 1]) {
         cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_value = cmds[player];
         cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_ack = false;
         cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].epoch = epoch + CMD_DELAY;
+        pkt.opcode = OPCODE_CMD;
+        pkt.epoch = epoch + CMD_DELAY;
+        pkt.input = cmds[player];
+        net_send(&pkt);
+
       }
 
-      for (int i = 0; i < BUFFER_SIZE; i++) {
+      for (int i = 0; i < (CMD_DELAY/2); i++) {
         if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false) {
           pkt.opcode = OPCODE_CMD;
           pkt.epoch = epoch + i;
