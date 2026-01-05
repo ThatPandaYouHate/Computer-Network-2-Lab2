@@ -76,6 +76,8 @@ int main(int argc, char *argv[argc + 1]) {
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
 
+  int received_pkt_count = 0;
+  
   for (int i = 0; i < CMD_DELAY; i++) {
     cmd_state[player][i].cmd_value = 0;
     cmd_state[player][i].cmd_ack = true;
@@ -122,6 +124,7 @@ int main(int argc, char *argv[argc + 1]) {
        */
       
       while (net_poll(&pkt)) {
+        received_pkt_count++;
         switch (pkt.opcode) {
           case OPCODE_CMD:
             cmd_state[other_player][pkt.epoch%BUFFER_SIZE].cmd_value = pkt.input;
@@ -166,7 +169,7 @@ int main(int argc, char *argv[argc + 1]) {
         }
       }
 
-      if (cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true) {
+      if (received_pkt_count > 0 &&cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true) {
         uint32_t epoch_end_tick = win_tick();
         uint32_t epoch_time = epoch_end_tick - epoch_start_tick;
         
@@ -179,6 +182,11 @@ int main(int argc, char *argv[argc + 1]) {
           max_epoch_time = epoch_time;
         }
         epoch_count++;
+        
+        // Print time for every 100th epoch
+        if (epoch % 100 == 0) {
+          fprintf(stderr, "epoch %u took %u ms\n", (unsigned)epoch, epoch_time);
+        }
         
         epoch_start_tick = epoch_end_tick;
 
