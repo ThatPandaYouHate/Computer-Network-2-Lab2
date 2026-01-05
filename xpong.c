@@ -70,7 +70,6 @@ int main(int argc, char *argv[argc + 1]) {
   unsigned short port_other = atoi(argv[3]); /* 9931 */
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
-  bool game_started = false;
 
   
   
