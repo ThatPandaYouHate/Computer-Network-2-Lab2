@@ -35,16 +35,20 @@
 static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
+static const int BUFFER_SIZE = 64;
+static const int CMD_DELAY = 25;
 
 
 #define OPCODE_CMD 0
 #define OPCODE_ACK 1
 
-typedef struct epoch {
-  bool cmd;
-  bool ack;
-  bool cmd_self;
-} epoch_t;
+typedef struct cmd_state {
+  int cmd_value;
+  bool cmd_ack;
+  int epoch;
+} cmd_state_t;
+
+static cmd_state_t cmd_state[2][BUFFER_SIZE] = {0};
 
 static void usage(const char *program_name) {
   fprintf(stderr, "Usage: %s <self_port> <peer_hostname> <peer_port> <player>\n", program_name);
@@ -71,14 +75,21 @@ int main(int argc, char *argv[argc + 1]) {
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
 
-  
-  
+  for (int i = 0; i < CMD_DELAY; i++) {
+    cmd_state[player][i].cmd_value = 0;
+    cmd_state[player][i].cmd_ack = true;
+    cmd_state[player][i].epoch = i;
+    cmd_state[other_player][i].cmd_value = 0;
+    cmd_state[other_player][i].cmd_ack = true;
+    cmd_state[other_player][i].epoch = i;
+  }
+  printf("cmd_state initialized\n");
+
   state_t state = sim_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   win_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   net_init(port_self, hostname_other, port_other);
 
   uint16_t epoch = 0;
-  epoch_t epoch_state = {false, false, false};
   cmd_t cmds[2];
   bool quit = false;
 
@@ -103,61 +114,70 @@ int main(int argc, char *argv[argc + 1]) {
        * receive a acknowledge packet, just mark its flag in epoch_state.
        */
       
-      while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
-        if (pkt.epoch == epoch) {
-          switch (pkt.opcode) {
-            case OPCODE_CMD:
-              epoch_state.cmd = true;
-              cmds[other_player] = pkt.input;
-              pkt.opcode = OPCODE_ACK;
-              pkt.epoch = epoch;
-              pkt.input = 0;
-              net_send(&pkt);
-              break;
-            case OPCODE_ACK:
-              epoch_state.ack = true;
-              break;
-          }
+      while (net_poll(&pkt)) {
+        switch (pkt.opcode) {
+          case OPCODE_CMD:
+            printf("received command packet from player %d\n", other_player);
+            cmd_state[other_player][pkt.epoch%BUFFER_SIZE].cmd_value = pkt.input;
+            cmd_state[other_player][pkt.epoch%BUFFER_SIZE].epoch = pkt.epoch;
+            pkt.opcode = OPCODE_ACK;
+            pkt.input = 0;
+            net_send(&pkt);
+            break;
+          case OPCODE_ACK:
+            printf("received acknowledge packet from player %d\n", other_player);
+            cmd_state[player][pkt.epoch%BUFFER_SIZE].cmd_ack = true;
+            break;
+          default:
+            printf("received unknown packet from player %d\n", other_player);
+            break;
         }
       }
 
       /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
          is not set */
       
-      if (!epoch_state.cmd_self) {
-        if (e.up) {
-          cmds[player] = CMD_UP;
-        } else if (e.down) {
-          cmds[player] = CMD_DOWN;
-        } else {
-          cmds[player] = CMD_NONE;
-        }
-
-        epoch_state.cmd_self = true;
+      
+      if (e.up) {
+        cmds[player] = CMD_UP;
+      } else if (e.down) {
+        cmds[player] = CMD_DOWN;
+      } else {
+        cmds[player] = CMD_NONE;
       }
 
-      /* TODO: Send a command packet. */
-      pkt.opcode = OPCODE_CMD;
-      pkt.epoch = epoch;
-      pkt.input = cmds[player];
-      net_send(&pkt);
 
-      /* TODO: Add conditions for simulation. To simulate and move onto the next
-         epoch, we must have received the command packet and the acknowledge
-         packet from the other player. */
+      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_value = cmds[player];
+      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_ack = false;
+      cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].epoch = epoch + CMD_DELAY;
 
-      if (epoch_state.cmd && epoch_state.ack) {
+      for (int i = 0; i < BUFFER_SIZE; i++) {
+        if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false) {
+          pkt.opcode = OPCODE_CMD;
+          pkt.epoch = epoch + i;
+          pkt.input = cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_value;
+          net_send(&pkt);
+          break;
+        }
+      }
+
+      if (cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true) {
         uint32_t epoch_end_tick = win_tick();
         fprintf(stderr, "epoch %u took %u ms\n", (unsigned)epoch,
                 (unsigned)(epoch_end_tick - epoch_start_tick));
         epoch_start_tick = epoch_end_tick;
 
+        cmds[other_player] = cmd_state[other_player][epoch % BUFFER_SIZE].cmd_value;
+        cmds[player] = cmd_state[player][epoch % BUFFER_SIZE].cmd_value;
         state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
-        //printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
-        ++epoch;
-        epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
-
         win_render(&state);
+        ++epoch;
+
+      }
+      else {
+        printf("epoch %u not ready\n", epoch);
+        printf("other_player epoch: %u\n", cmd_state[other_player][epoch % BUFFER_SIZE].epoch);
+        printf("player ack: %u\n", cmd_state[player][epoch % BUFFER_SIZE].cmd_ack);
       }
     }
   }
