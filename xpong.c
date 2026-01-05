@@ -37,7 +37,7 @@ static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
 static const int BUFFER_SIZE = 64;
-static const int CMD_DELAY = 10;
+static const int CMD_DELAY = 15;
 
 
 #define OPCODE_CMD 0
@@ -97,6 +97,8 @@ int main(int argc, char *argv[argc + 1]) {
   uint16_t epoch = 0;
   cmd_t cmds[2];
   bool quit = false;
+  int loop_count = 0;
+  bool in_sync = true;
 
   uint32_t previous_tick = win_tick();
   uint32_t epoch_start_tick = previous_tick;
@@ -168,21 +170,32 @@ int main(int argc, char *argv[argc + 1]) {
         pkt.epoch = epoch + CMD_DELAY;
         pkt.input = cmds[player];
         net_send(&pkt);
-
       }
 
-      for (int i = 0; i < (CMD_DELAY/2); i++) {
-        if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false && resend_done == false) {
+      if (loop_count > 100) {
+        loop_count = 0;
+        resend_done = false;
+      }
+
+      int resend_limit = CMD_DELAY/2;
+      if (in_sync == false) {
+        resend_limit = CMD_DELAY;
+      }
+
+      for (int i = 0; i < resend_limit; i++) {
+        if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false && (resend_done == false || epoch == 0)) {
           pkt.opcode = OPCODE_CMD;
           pkt.epoch = epoch + i;
           pkt.input = cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_value;
           net_send(&pkt);
-          break;
         }
       }
       resend_done = true;
 
-      if (received_pkt_count > 0 &&cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true) {
+      if (in_sync == false && cmd_state[other_player][(epoch + CMD_DELAY) % BUFFER_SIZE].epoch == epoch + CMD_DELAY) {
+        in_sync = true;
+      }
+      if (received_pkt_count > 0 &&cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true && in_sync == true) {
         uint32_t epoch_end_tick = win_tick();
         uint32_t epoch_time = epoch_end_tick - epoch_start_tick;
         
@@ -235,7 +248,15 @@ int main(int argc, char *argv[argc + 1]) {
         ++epoch;
         resend_done = false;
       }
-      
+      else {
+        if (in_sync == true) {
+          printf("epoch %u not ready\n", epoch);
+        }
+        if (epoch > 0) {
+          in_sync = false;
+        }
+      }
+      loop_count++;
     }
   }
 
