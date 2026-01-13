@@ -143,13 +143,13 @@ int main(int argc, char *argv[argc + 1]) {
          packet from the other player. */
 
       if (epoch_state.cmd && epoch_state.ack) {
-        cmd_buffer[player][(epoch + 10) % BUFFER_SIZE] = cmds[player];
-        cmd_buffer[other_player][(epoch + 10) % BUFFER_SIZE] = cmds[other_player];
+        cmd_buffer[player][(epoch + 2) % BUFFER_SIZE] = cmds[player];
+        cmd_buffer[other_player][(epoch + 2) % BUFFER_SIZE] = cmds[other_player];
 
         printf("[RECORD] epoch %d: storing cmds for epoch %d -> player %d: %d, player %d: %d\n",
-               epoch, (epoch + 10) % BUFFER_SIZE, player, cmds[player], other_player, cmds[other_player]);
+               epoch, (epoch + 2) % BUFFER_SIZE, player, cmds[player], other_player, cmds[other_player]);
 
-        if (epoch >= 10) {
+        if (epoch >= 2) {
           cmd_t epoch_cmds[2] = {
             cmd_buffer[0][epoch % BUFFER_SIZE],
             cmd_buffer[1][epoch % BUFFER_SIZE]
