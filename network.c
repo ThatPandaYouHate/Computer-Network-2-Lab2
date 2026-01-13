@@ -66,6 +66,7 @@ void net_init(unsigned short port_self, const char *hostname_other,
     const char msg[] = "bind failed\n";
     write(STDERR_FILENO, msg, sizeof(msg) - 1);
     _exit(1);
+    printf("bind failed\n");
   }
 
   /* 3. Sätt mottagarens adress (hostname_other, port_other) */

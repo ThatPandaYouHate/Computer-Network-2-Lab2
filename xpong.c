@@ -70,6 +70,7 @@ int main(int argc, char *argv[argc + 1]) {
   unsigned short port_other = atoi(argv[3]); /* 9931 */
   int player = atol(argv[4]);                /* 0 */
   int other_player = player == 0 ? 1 : 0;
+  bool debug = true;  // Set to false to disable debug prints
 
   
   
@@ -104,6 +105,10 @@ int main(int argc, char *argv[argc + 1]) {
        */
       
       while ((!epoch_state.cmd || !epoch_state.ack) && net_poll(&pkt)) {
+        if (debug) {
+          printf("[DEBUG] Received packet: opcode=%d, epoch=%d, input=%d\n", 
+                 pkt.opcode, pkt.epoch, pkt.input);
+        }
         if (pkt.epoch == epoch) {
           switch (pkt.opcode) {
             case OPCODE_CMD:
@@ -115,6 +120,9 @@ int main(int argc, char *argv[argc + 1]) {
               net_send(&pkt);
               break;
             case OPCODE_ACK:
+              if (debug) {
+                printf("[DEBUG] Received ACK packet for epoch %d\n", epoch);
+              }
               epoch_state.ack = true;
               break;
           }
@@ -134,6 +142,10 @@ int main(int argc, char *argv[argc + 1]) {
         }
 
         epoch_state.cmd_self = true;
+        if (debug) {
+          printf("[DEBUG] Player %d command set: %d for epoch %d\n", 
+                 player, cmds[player], epoch);
+        }
       }
 
       /* TODO: Send a command packet. */
@@ -141,6 +153,9 @@ int main(int argc, char *argv[argc + 1]) {
       pkt.epoch = epoch;
       pkt.input = cmds[player];
       net_send(&pkt);
+      if (debug) {
+        printf("[DEBUG] Sent CMD packet: epoch=%d, input=%d\n", epoch, cmds[player]);
+      }
 
       /* TODO: Add conditions for simulation. To simulate and move onto the next
          epoch, we must have received the command packet and the acknowledge
@@ -156,8 +171,14 @@ int main(int argc, char *argv[argc + 1]) {
         //printf("epoch: %d\nplayer 0: %d\nplayer 1: %d\n", epoch, cmds[0], cmds[1]);
         ++epoch;
         epoch_state.cmd_self = epoch_state.cmd = epoch_state.ack = false;
+        if (debug) {
+          printf("[DEBUG] Advanced to epoch %d\n", epoch);
+        }
 
         win_render(&state);
+      } else if (debug) {
+        printf("[DEBUG] Epoch %d waiting: cmd=%d, ack=%d, cmd_self=%d\n",
+               epoch, epoch_state.cmd, epoch_state.ack, epoch_state.cmd_self);
       }
     }
   }
