@@ -37,7 +37,7 @@ static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
 static const int SIM_INTERVAL = 10;
 static const int BUFFER_SIZE = 64;
-static const int CMD_DELAY = 15;
+static const int CMD_DELAY = 13;
 
 
 #define OPCODE_CMD 0
