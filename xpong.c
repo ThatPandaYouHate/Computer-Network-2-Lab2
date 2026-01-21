@@ -33,24 +33,40 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+/* Game display constants */
 static const int SCREEN_WIDTH = 720;
 static const int SCREEN_HEIGHT = 640;
-static const int SIM_INTERVAL = 10;
-static const int BUFFER_SIZE = 64;
-static const int CMD_DELAY = 13;
+static const int SIM_INTERVAL = 10;  /* Simulation interval in milliseconds */
 
+/* Network protocol constants */
+static const int BUFFER_SIZE = 64;   /* Circular buffer size for command state */
+static const int CMD_DELAY = 25;     /* Number of epochs ahead to send commands */
 
-#define OPCODE_CMD 0
-#define OPCODE_ACK 1
+/* Packet opcodes */
+#define OPCODE_CMD 0  /* Command packet: contains player input */
+#define OPCODE_ACK 1  /* Acknowledgment packet: confirms receipt of command */
 
+/* Buffer index macros for circular buffer access
+ * These macros calculate the correct index in the circular buffer for a given epoch */
+#define PLANNED_EPOCH_IN_BUFFER(epoch) ((epoch) + CMD_DELAY) % BUFFER_SIZE  /* Index for future epoch (epoch + delay) */
+#define CURRENT_EPOCH_IN_BUFFER(epoch) (epoch) % BUFFER_SIZE                /* Index for current epoch */
+
+/* Command state structure
+ * Tracks the state of commands for each epoch in the circular buffer */
 typedef struct cmd_state {
-  int cmd_value;
-  bool cmd_ack;
-  int epoch;
+  int cmd_value;   /* The command value (CMD_NONE, CMD_UP, or CMD_DOWN) */
+  bool cmd_ack;    /* Whether this command has been acknowledged by the peer */
+  int epoch;       /* The epoch number this state belongs to */
 } cmd_state_t;
 
+/* Command state buffer: [player_index][buffer_index]
+ * Stores command states for both players in a circular buffer */
 static cmd_state_t cmd_state[2][BUFFER_SIZE] = {0};
 
+/**
+ * Print usage information and exit
+ * @param program_name Name of the program executable
+ */
 static void usage(const char *program_name) {
   fprintf(stderr, "Usage: %s <self_port> <peer_hostname> <peer_port> <player>\n", program_name);
   fprintf(stderr, "\n");
@@ -70,16 +86,19 @@ int main(int argc, char *argv[argc + 1]) {
     usage(argv[0]);
     return 1;
   }
-  unsigned short port_self = atoi(argv[1]);  /* 9930 */
-  const char *hostname_other = argv[2];      /* "127.0.0.1" */
-  unsigned short port_other = atoi(argv[3]); /* 9931 */
-  int player = atol(argv[4]);                /* 0 */
+  /* Parse command line arguments */
+  unsigned short port_self = atoi(argv[1]);
+  const char *hostname_other = argv[2];
+  unsigned short port_other = atoi(argv[3]);
+  int player = atol(argv[4]);
   int other_player = player == 0 ? 1 : 0;
 
-  int received_pkt_count = 0;
-  bool resend_done = false;
+  /* Network state tracking */
+  int received_pkt_count = 0;  /* Counter for received packets */
+  bool resend_done = false;     /* Flag to prevent duplicate resends in same iteration */
   
-  
+  /* Initialize command state buffer for the first CMD_DELAY epochs
+   * This pre-fills the buffer with initial state to handle the delay mechanism */
   for (int i = 0; i < CMD_DELAY; i++) {
     cmd_state[player][i].cmd_value = 0;
     cmd_state[player][i].cmd_ack = false;
@@ -94,24 +113,26 @@ int main(int argc, char *argv[argc + 1]) {
   win_init(SCREEN_WIDTH, SCREEN_HEIGHT);
   net_init(port_self, hostname_other, port_other);
 
-  uint16_t epoch = 0;
-  cmd_t cmds[2];
-  bool quit = false;
-  int loop_count = 0;
-  bool in_sync = true;
+  /* Game state variables */
+  uint16_t epoch = 0;           /* Current epoch number */
+  cmd_t cmds[2];                /* Commands for both players in current epoch */
+  bool quit = false;            /* Flag to exit main loop */
+  int loop_count = 0;           /* Counter for periodic operations */
+  bool in_sync = true;          /* Whether both players are synchronized */
 
-  uint32_t previous_tick = win_tick();
-  uint32_t epoch_start_tick = previous_tick;
+  /* Timing variables */
+  uint32_t previous_tick = win_tick();      /* Previous simulation tick */
+  uint32_t epoch_start_tick = previous_tick; /* Start time of current epoch */
   
-  // Statistics for epoch times
-  uint32_t total_epoch_time = 0;
-  uint32_t min_epoch_time = UINT32_MAX;
-  uint32_t max_epoch_time = 0;
-  uint16_t epoch_count = 0;
+  /* Performance statistics */
+  uint32_t total_epoch_time = 0;      /* Sum of all epoch durations */
+  uint32_t min_epoch_time = UINT32_MAX; /* Minimum epoch duration */
+  uint32_t max_epoch_time = 0;         /* Maximum epoch duration */
+  uint16_t epoch_count = 0;            /* Total number of completed epochs */
   
-  // Array to store last 100 epoch times for averaging
+  /* Circular buffer for recent epoch times (for averaging) */
   uint32_t last_100_epoch_times[100] = {0};
-  uint16_t epoch_time_index = 0;
+  uint16_t epoch_time_index = 0;  /* Current position in circular buffer */
 
   printf("game started\n");
   printf("waiting for player %d to start the game\n", other_player);
@@ -121,28 +142,29 @@ int main(int argc, char *argv[argc + 1]) {
     if (e.quit)
       quit = true;
 
+    /* Simulation loop: runs every SIM_INTERVAL milliseconds */
     for (; win_tick() - previous_tick > SIM_INTERVAL;
         previous_tick += SIM_INTERVAL) {
-      /*
-       * TODO: Poll and handle each packet until no more packet.
-       *
-       * If we receive a command packet, send an acknowledgement packet, mark
-       * its flag in epoch_state, and set the command in cmds array. If we
-       * receive a acknowledge packet, just mark its flag in epoch_state.
-       */
       
+      /* Packet reception and processing
+       * Poll for incoming packets and handle them according to protocol:
+       * - CMD packets: Store command, send ACK response
+       * - ACK packets: Mark corresponding command as acknowledged */
       while (net_poll(&pkt)) {
         received_pkt_count++;
         switch (pkt.opcode) {
           case OPCODE_CMD:
-            cmd_state[other_player][pkt.epoch%BUFFER_SIZE].cmd_value = pkt.input;
-            cmd_state[other_player][pkt.epoch%BUFFER_SIZE].epoch = pkt.epoch;
+            /* Received command from other player: store it and send ACK */
+            cmd_state[other_player][CURRENT_EPOCH_IN_BUFFER(pkt.epoch)].cmd_value = pkt.input;
+            cmd_state[other_player][CURRENT_EPOCH_IN_BUFFER(pkt.epoch)].epoch = pkt.epoch;
+            /* Convert packet to ACK and send response */
             pkt.opcode = OPCODE_ACK;
             pkt.input = 0;
             net_send(&pkt);
             break;
           case OPCODE_ACK:
-            cmd_state[player][pkt.epoch%BUFFER_SIZE].cmd_ack = true;
+            /* Received acknowledgment: mark our command as acknowledged */
+            cmd_state[player][CURRENT_EPOCH_IN_BUFFER(pkt.epoch)].cmd_ack = true;
             break;
           default:
             printf("received unknown packet from player %d\n", other_player);
@@ -150,10 +172,7 @@ int main(int argc, char *argv[argc + 1]) {
         }
       }
 
-      /* TODO: Update cmds[player] and set cmd_self in epoch_state if cmd_self
-         is not set */
-      
-      
+      /* Read player input and update command for current epoch */
       if (e.up) {
         cmds[player] = CMD_UP;
       } else if (e.down) {
@@ -162,44 +181,74 @@ int main(int argc, char *argv[argc + 1]) {
         cmds[player] = CMD_NONE;
       }
 
-      if (cmd_state[player][(epoch+CMD_DELAY) % BUFFER_SIZE].epoch != epoch + CMD_DELAY) {
-        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_value = cmds[player];
-        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].cmd_ack = false;
-        cmd_state[player][(epoch+CMD_DELAY)%BUFFER_SIZE].epoch = epoch + CMD_DELAY;
+      /* Command delay mechanism: send commands CMD_DELAY epochs ahead
+       * This allows commands to arrive in time despite network latency.
+       * Only send if we haven't already sent a command for this future epoch */
+      if (cmd_state[player][PLANNED_EPOCH_IN_BUFFER(epoch)].epoch != epoch + CMD_DELAY) {
+        /* Store command in buffer for future epoch */
+        cmd_state[player][PLANNED_EPOCH_IN_BUFFER(epoch)].cmd_value = cmds[player];
+        cmd_state[player][PLANNED_EPOCH_IN_BUFFER(epoch)].cmd_ack = false;
+        cmd_state[player][PLANNED_EPOCH_IN_BUFFER(epoch)].epoch = epoch + CMD_DELAY;
+        /* Send command packet for future epoch */
         pkt.opcode = OPCODE_CMD;
         pkt.epoch = epoch + CMD_DELAY;
         pkt.input = cmds[player];
         net_send(&pkt);
       }
 
+      /* Periodic reset: allow resend after 100 loop iterations
+       * This prevents infinite waiting if packets are lost */
       if (loop_count > 100) {
         loop_count = 0;
         resend_done = false;
       }
 
-      int resend_limit = CMD_DELAY/2;
+      /* Resend mechanism: retransmit unacknowledged commands
+       * Use adaptive resend limit based on sync status:
+       * - When in sync: only resend recent epochs (CMD_DELAY/2)
+       * - When out of sync: resend more epochs (CMD_DELAY) to recover faster */
+      int resend_limit = CMD_DELAY / 2;
       if (in_sync == false) {
         resend_limit = CMD_DELAY;
       }
 
+      /* Resend unacknowledged commands
+       * Only resend if:
+       * 1. Command hasn't been acknowledged
+       * 2. We haven't already done resend this iteration (resend_done == false)
+       *    OR it's the first epoch (epoch == 0) */
       for (int i = 0; i < resend_limit; i++) {
-        if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false && (resend_done == false || epoch == 0)) {
+        if (cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_ack == false && 
+            (resend_done == false || epoch == 0)) {
           pkt.opcode = OPCODE_CMD;
           pkt.epoch = epoch + i;
           pkt.input = cmd_state[player][(epoch + i) % BUFFER_SIZE].cmd_value;
           net_send(&pkt);
         }
       }
-      resend_done = true;
+      resend_done = true;  /* Mark that resend has been done for this iteration */
 
-      if (in_sync == false && cmd_state[other_player][(epoch + CMD_DELAY) % BUFFER_SIZE].epoch == epoch + CMD_DELAY) {
+      /* Sync detection: check if we've received the delayed command from other player
+       * This indicates that the other player is sending commands ahead of time */
+      if (in_sync == false && cmd_state[other_player][PLANNED_EPOCH_IN_BUFFER(epoch)].epoch == epoch + CMD_DELAY) {
         in_sync = true;
       }
-      if (received_pkt_count > 0 &&cmd_state[other_player][epoch % BUFFER_SIZE].epoch == epoch && cmd_state[player][epoch % BUFFER_SIZE].cmd_ack == true && in_sync == true) {
+      /* Epoch advancement condition: can we proceed to next epoch?
+       * Requirements:
+       * 1. At least one packet has been received (connection established)
+       * 2. We have received command from other player for current epoch
+       * 3. Our command for current epoch has been acknowledged
+       * 4. Both players are synchronized */
+      if (received_pkt_count > 0 && 
+          cmd_state[other_player][CURRENT_EPOCH_IN_BUFFER(epoch)].epoch == epoch && 
+          cmd_state[player][CURRENT_EPOCH_IN_BUFFER(epoch)].cmd_ack == true && 
+          in_sync == true) {
+        
+        /* Calculate epoch duration */
         uint32_t epoch_end_tick = win_tick();
         uint32_t epoch_time = epoch_end_tick - epoch_start_tick;
         
-        // Collect statistics
+        /* Update performance statistics */
         total_epoch_time += epoch_time;
         if (epoch_time < min_epoch_time) {
           min_epoch_time = epoch_time;
@@ -209,24 +258,25 @@ int main(int argc, char *argv[argc + 1]) {
         }
         epoch_count++;
         
-        // Store epoch time in circular buffer
+        /* Store epoch time in circular buffer for averaging */
         last_100_epoch_times[epoch_time_index] = epoch_time;
         epoch_time_index = (epoch_time_index + 1) % 100;
         
-        // Print average time for every 100th epoch
+        /* Print average time every 100 epochs for monitoring */
         if (epoch > 0 && epoch % 100 == 0) {
           uint32_t sum = 0;
           uint16_t count = epoch_count < 100 ? epoch_count : 100;
           
-          // Calculate average from circular buffer
-          // If we have less than 100 epochs, use all available
-          // Otherwise, use the last 100 (which wraps around)
+          /* Calculate average from circular buffer
+           * Handle two cases:
+           * 1. Less than 100 epochs: use all available data
+           * 2. 100+ epochs: use last 100 (circular buffer wraps around) */
           if (epoch_count < 100) {
             for (uint16_t i = 0; i < count; i++) {
               sum += last_100_epoch_times[i];
             }
           } else {
-            // Circular buffer: values from epoch_time_index to end, then from start to epoch_time_index
+            /* Circular buffer access: read from current index to end, then from start to index */
             for (uint16_t i = epoch_time_index; i < 100; i++) {
               sum += last_100_epoch_times[i];
             }
@@ -239,19 +289,26 @@ int main(int argc, char *argv[argc + 1]) {
                   (unsigned)epoch, count, avg_time);
         }
         
-        epoch_start_tick = epoch_end_tick;
+        epoch_start_tick = epoch_end_tick;  /* Reset timer for next epoch */
 
-        cmds[other_player] = cmd_state[other_player][epoch % BUFFER_SIZE].cmd_value;
-        cmds[player] = cmd_state[player][epoch % BUFFER_SIZE].cmd_value;
+        /* Retrieve commands for both players from buffer */
+        cmds[other_player] = cmd_state[other_player][CURRENT_EPOCH_IN_BUFFER(epoch)].cmd_value;
+        cmds[player] = cmd_state[player][CURRENT_EPOCH_IN_BUFFER(epoch)].cmd_value;
+        
+        /* Update game simulation and render */
         state = sim_update(&state, cmds, SIM_INTERVAL / 1000.f);
         win_render(&state);
+        
+        /* Advance to next epoch and reset resend flag */
         ++epoch;
         resend_done = false;
       }
       else {
+        /* Epoch not ready: waiting for synchronization or acknowledgments */
         if (in_sync == true) {
           printf("epoch %u not ready\n", epoch);
         }
+        /* Mark as out of sync if we're past the initial epoch */
         if (epoch > 0) {
           in_sync = false;
         }
@@ -260,7 +317,7 @@ int main(int argc, char *argv[argc + 1]) {
     }
   }
 
-  // Print summary of epoch times
+  /* Print performance summary when program exits */
   if (epoch_count > 0) {
     uint32_t avg_epoch_time = total_epoch_time / epoch_count;
     fprintf(stderr, "\n=== Epoch Time Summary ===\n");
